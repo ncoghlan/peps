@@ -1,5 +1,5 @@
 PEP: 3150
-Title: Statement local namespaces (aka "given" clause)
+Title: Syntax for dynamic scope access
 Version: $Revision$
 Last-Modified: $Date$
 Author: Nick Coghlan <ncoghlan@gmail.com>
@@ -7,7 +7,7 @@ Status: Deferred
 Type: Standards Track
 Content-Type: text/x-rst
 Created: 2010-07-09
-Python-Version: 3.4
+Python-Version: 3.7
 Post-History: 2010-07-14, 2011-04-21, 2011-06-13
 Resolution: TBD
 
@@ -15,15 +15,58 @@ Resolution: TBD
 Abstract
 ========
 
-This PEP proposes the addition of an optional ``given`` clause to several
-Python statements that do not currently have an associated code suite. This
-clause will create a statement local namespace for additional names that are
-accessible in the associated statement, but do not become part of the
-containing namespace.
+This PEP proposes a new "dynamic scoping" protocol, whereby two new prefix
+operators, ``?.<identifier>`` and ``?[<expr>]``, would become syntactic sugar
+for access to an implicitly defined ``__dynamic_scope__`` variable::
 
-Adoption of a new symbol, ``?``, is proposed to denote a forward reference
-to the namespace created by running the associated code suite. It will be
-a reference to a ``types.SimpleNamespace`` object.
+    ?.<identifier>  # -> __dynamic_scope__.<identifier>
+    ?[<expr>]       # -> __dynamic_scope__.__dict__[<expr>]
+
+A new ``types.DynamicScope`` wrapper class would be added to allow the use of
+arbitrary mappings as dynamic scopes.
+
+The following implicit dynamic scopes would then be defined:
+
+* modules would be their own dynamic scope
+* class bodies would have their dynamic scope set to ``DynamicScope(namespace)``
+* function bodies (including for lambda expressions, generators, and coroutines)
+  would have their dynamic scope set to the first positional parameter (thus
+  binding the instance in normal method definitions, and the class in class
+  methods)
+* the implicit functions created for comprehensions and generator expressions
+  would be updated to receive the caller's dynamic scope as their first
+  positional parameter (such that dynamic scope references in these implicit
+  functions would refer to the scope where they are used, *not* to the
+  result of the outermost iterable expression)
+* (maybe?) with statements would have their dynamic scope set to the return
+  value of ``cm.__enter__()`` (regardless of whether or not it was bound to a
+  name)
+* (maybe?) exception handlers would have their dynamic scope set to the caught
+  exception (regardless of whether or not it was bound to a name)
+
+(Last two are flagged as "maybe?", as if you don't worry about changing the scope
+*back*, then the explicit forms would just be "__dynamic_scope__ = cm" and
+"__dynamic_scope__ = exc" respectively. The nice part of making it implicit
+is that it also automates the process of switch the scope *back* to the original
+one)
+
+These changes will make it easier to define context dependent code snippets,
+whereby the target of the operation will change based on where the code is
+used (module, class body, function body, with statement, exception handler)
+
+
+Finally, a new optional ``given`` clause would be added to several Python
+statements that do not currently have an associated code suite. This clause will
+create a statement local dynamic scope that is active specifically for the
+associated statement, but reverts to the previously defined dynamic scope after
+the statement completes. This would essentially be syntactic sugar for::
+
+    def _given(outer_scope):
+        <GIVEN_BODY>
+
+    with DynamicScope(_given(__dynamic_scope__)):
+        <OUTER_STMT>
+
 
 The primary motivation is to enable a more declarative style of programming,
 where the operation to be performed is presented to the reader first, and the
@@ -49,6 +92,23 @@ of this and related concepts over the years (e.g. [1]_, [2]_, [3]_, [6]_,
 [8]_), and is inspired to some degree by the ``where`` and ``let`` clauses in
 Haskell. It avoids some problems that have been identified in past proposals,
 but has not yet itself been subject to the test of implementation.
+
+
+Relationship to other PEPs
+==========================
+
+This PEP shares a proposed syntax with the ``None``-aware attribute and item
+access operators defined in PEP 505, only using the prefix form rather than
+the infix form.
+
+Accordingly, if both PEPs were to be accepted, then this PEP should be amended
+to use the ``None``-aware variants of the operators when looking up values::
+
+    ?.<identifier>  # -> __dynamic_scope__?.<identifier>
+    ?[<expr>]       # -> __dynamic_scope__.__dict__?[<expr>]
+
+The semantics for setting values would remain unchanged, as the PEP 505 infix
+operators only apply to retreiving values.
 
 
 Proposal
