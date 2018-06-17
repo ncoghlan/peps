@@ -1,4 +1,4 @@
-PEP: 578
+PEP: 9999
 Title: Explicit target scopes for inline assignments
 Author: Nick Coghlan <ncoghlan@gmail.com>
 Status: Draft
