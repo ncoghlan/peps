@@ -27,7 +27,8 @@ Firstly, a new compile time ``TargetNameError`` is added as a subclass of
 ``SyntaxError`` to handle cases where it is deemed to be unclear which target
 scope is expected to be modified by an inline assignment.
 
-For example, the following code would raise ``TargetNameError``::
+For example, the following code would raise ``TargetNameError`` if ``x`` wasn't
+otherwise bound in the current scope::
 
     x := 1
 
