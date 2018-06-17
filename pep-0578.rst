@@ -246,7 +246,7 @@ the compiler will typically catch that and raise ``TargetNameError`` (it will
 only miss it if the typo results in a different valid name).
 
 If an ``elif`` clause does need to introduce a new name, then it can have its
-own ``given` clause (which will make the introduction of the new target name
+own ``given`` clause (which will make the introduction of the new target name
 more obvious to the reader of the code).
 
 
