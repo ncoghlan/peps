@@ -276,20 +276,28 @@ Deliberately updating parent scope state
 
 Since this PEP deliberately exposes the fact that scoped expressions are
 implemented as implicitly nested functions, the related examples from PEP 572
-become slightly more verbose, since the target scope has to be specified
-explicitly.
+become slightly more verbose in some respects, since the target scope has to be
+specified explicitly. However, they become less verbose in other ways, since
+the iteration variable can be exported to the outer scope directly, rather than
+needing to be found to a different name in an assignment expression.
 
 Updating a module global::
 
-    if any((comment := line).startswith('#') for line in lines given global comment):
-        print("First comment:", comment)
+    if any(line.startswith('#') for line in lines given global line):
+        print("First comment:", line)
     else:
-        print("There are no comments")
+        if "line" not in globals():
+            print("There was no input")
+        else:
+            print("There are no comments")
 
-    if all((nonblank := line).strip() == '' for line in lines given global nonblank):
-        print("All lines are blank")
+    if all(line.strip() == '' for line in lines given global line):
+        if "line" not in globals():
+            print("There was no input")
+        else:
+            print("All lines are blank")
     else:
-        print("First non-blank line:", nonblank)
+        print("First non-blank line:", line)
 
     # Compute partial sums in a list comprehension
     total = 0
@@ -298,32 +306,40 @@ Updating a module global::
 
 Updating a function local::
 
-    comment = _no_lines = object()
-    if any((comment := line).startswith('#') for line in lines given nonlocal comment):
-        print("First comment:", comment)
+    line = _no_lines = object()
+    if any(line.startswith('#') for line in lines given nonlocal line):
+        print("First comment:", line)
     else:
-        print("There are no comments")
+        if line is _no_lines:
+            print("There was no input")
+        else:
+            print("There are no comments")
 
-    nonblank = _no_lines = object()
-    if all((nonblank := line).strip() == '' for line in lines given nonlocal nonblank):
-        print("All lines are blank")
+    line = _no_lines = object()
+    if all(line.strip() == '' for line in lines given nonlocal line):
+        if line is _no_lines:
+            print("There was no input")
+        else:
+            print("All lines are blank")
     else:
-        print("First non-blank line:", nonblank)
+        print("First non-blank line:", line)
+    if line is _no_lines:
+        print("There was no input")
 
     # Compute partial sums in a list comprehension
     total = 0
     partial_sums = [total := total + v for v in values given nonlocal total]
     print("Total:", total)
 
-It's the view of this PEP's author that the extra verbosity in these cases makes
-it *much* clearer to a reader what's actually going on, without requiring them
-to make the intuitive leap that the name binding inside the generator expression
-or comprehension is going to implicitly leak into the current scope.
+It's the view of this PEP's author that the requirement to be explicit in these
+cases makes it clearer to a reader what's actually going on, without requiring
+them to make the intuitive leap that a name binding expression inside a generator
+expression or comprehension is going to implicitly leak into the current scope.
 
 In the function scope case, the need to explicitly declare the target local
-variable first encourages handling the case where the generator expression or
-comprehension never iterates at all, and hence the inline assignment expression
-never gets executed.
+variable first also encourages handling the case where the generator expression
+or comprehension never iterates at all, and hence the inline assignment
+expression never gets executed.
 
 
 
