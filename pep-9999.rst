@@ -371,14 +371,24 @@ It likely makes sense to use the same principle for the ``while`` statement
 header clause, such that the partial sums example maps easily to the ``while``
 loop form::
 
-    while (total := total + get_value()) < limit given total = 0:
+    while (total := total + get_value()) < limit given (total = 0):
         ...
 
-The argument against allowing this is that this code could already be more
+And you could write code like::
+
+    while time.monotonic() < deadline given (deadline = time.monotonic() + timeout):
+        ...
+
+
+The argument against allowing this is that this code can already be quite
 clearly written as::
 
     total = 0
     while (total := total + get_value()) < limit:
+        ...
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
         ...
 
 Under this view, ``if``, ``elif``, and ``while`` wouldn't permit the inline
@@ -391,7 +401,34 @@ target declarations in ``elif`` clauses at all - it may be reasonable to require
 such cases to be written as a full nested ``if`` statement in an ``else`` clause,
 deliberately breaking up the symmetry across the different branches.
 
+Current thoughts: keep the TARGETS clause consistent everywhere, and be clear
+that in while loops, comprehensions, and generator expressions, any initialisers
+in the TARGETS clause only get executed once (before the loop starts)
 
+
+Updating augmented assignments to raise TargetNameError
+-------------------------------------------------------
+
+The cases where the current PEP proposes to raise ``TargetNameError`` are
+essentially those where an augmented assignment in the same location would raise
+``UnboundLocalError``::
+
+    >>> def f():
+    ...     x += 1
+    ...
+    >>> f()
+    Traceback (most recent call last):
+      File "<stdin>", line 1, in <module>
+      File "<stdin>", line 2, in f
+    UnboundLocalError: local variable 'x' referenced before assignment
+
+There are many such cases which the compiler could potentially detect at compile
+time instead, and raise ``TargetNameError``.
+
+However, any such change would need to be introduced as a deprecation warning
+for at least one release, as an ``UnboundLocalError`` in dead code that you
+never actually call is harmless, but a ``TargetNameError`` in such code at
+compile time would keep the entire module from being imported.
 
 
 Design discussion
@@ -596,6 +633,7 @@ Eric Snow's feedback on a pre-release version of PEP 577 helped make it
 significantly more readable, and then Guido van Rossum's review comments on
 PEP 577 were one of the main drivers that led to it being withdrawn and this
 proposal being made in its place.
+
 
 Appendix A: Additional Examples from PEP 572
 ============================================
