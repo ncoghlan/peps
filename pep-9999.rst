@@ -350,10 +350,12 @@ following issues in the PEP 572 examples::
 * the blank line checking example always leaves ``nonblank`` bound to the last
   processed line, regardless of whether that line is blank or not
 
-These issues were addressed by exporting the ``line`` iteration variable
+These issues were addressed here by exporting the ``line`` iteration variable
 directly instead of binding it to a different name, and by pre-binding ``line``
 to a sentinel value that indicated the comprehension never rebound it to a
 different target.
+
+Fixes were also submitted for PEP 572: https://github.com/python/peps/pull/684/files
 
 
 Open Questions
