@@ -1,0 +1,729 @@
+PEP: 9999
+Title: Explicit target scopes for inline assignments
+Author: Nick Coghlan <ncoghlan@gmail.com>
+Status: Draft
+Type: Standards Track
+Content-Type: text/x-rst
+Requires: 572
+Created: 17-Jun-2018
+Python-Version: 3.8
+Post-History: 22-May-2018
+
+
+Abstract
+========
+
+This is a competing proposal to PEP 572 that retains the same syntax and
+semantics for names that are already defined as being local to a regular block
+scope, but proposes different syntax and semantics for the following cases:
+
+* assignments to target names that are not otherwise declared as being local
+  to the current block scope
+* assignments to target names inside scoped expressions (whether lambda
+  expressions, generator expressions, or comprehensions)
+
+Two major design elements are added in this proposal relative to PEP 572.
+
+Firstly, a new compile time ``TargetNameError`` is added as a subclass of
+``SyntaxError`` to handle cases where it is deemed to be unclear which target
+scope is expected to be modified by an inline assignment.
+
+For example, the following code would raise ``TargetNameError`` if ``x`` wasn't
+otherwise bound in the current scope::
+
+    x := 1
+
+Secondly, a new optional ``given`` clause is added to several constructs to
+allow developers to explicitly declare the intended target scope of the name.
+For example, the assignment statements in this example::
+
+    x = get_value()
+    while x:
+        ...
+        x = get_value()
+
+would be equivalent to the following inline assignment and scope declaration::
+
+    while x := get_value() given x:
+        ...
+
+Note that this PEP is only a partial competitor to PEP 572, in that if that
+PEP is ultimately rejected, then this PEP would also be considered rejected. See
+`Relationship with PEP 572`_ for more details on the connections between
+the two PEPs.
+
+
+Syntax and semantics
+====================
+
+Block scopes and scoped expressions
+-----------------------------------
+
+To help simplify the description of the intended semantics, this PEP introduces
+two new terms for describing Python scopes:
+
+* "block scope": a module, class, or function scope. Block scopes will typically
+  cover several statements, and may include complex control flow statements
+  with one or more nested suites.
+* "scoped expression": a lambda expression, generator expression, or container
+  comprehension, which defines a new execution scope either to hide local name
+  bindings (container comprehensions), or else to hide local name bindings and
+  also to enable delayed evaluation (lamdba expressions and generator expressions)
+
+
+Removing implicit scope declarations from inline assignments
+------------------------------------------------------------
+
+PEP 572 proposes the following implicit scoping semantics for assignment
+expressions:
+
+* at block scope, ``NAME := EXPR`` implicitly declares ``NAME`` to be a local
+  variable, the same way ``NAME = EXPR`` does, but to nudge new users towards
+  the more established spelling, ``NAME := EXPR`` is prohibited as a top level
+  expression (it must be written ``NAME = EXPR`` or ``(NAME := EXPR)`` instead)
+* in lambda expressions, ``NAME := EXPR`` implicitly declares ``NAME`` to be
+  a local variable, just as it does at block scope
+* in other scoped expressions, ``NAME := EXPR`` implicitly declares ``NAME`` to
+  be local to the nearest containing block scope or lambda expression
+
+This PEP instead proposes to handle inline assignment target names as follows:
+
+* at module and class scope, ``NAME := EXPR`` implicitly declares ``NAME`` to be
+  local to the current scope (as it does in PEP 572 - this is a design constraint
+  imposed by the fact that the compiler doesn't have full compile time visibility
+  into the names defined in these scopes).
+* at function scope, ``NAME := EXPR`` is only permitted if the target scope of
+  ``NAME`` has previously been declared as being local, nonlocal, or global.
+  Assignments to undeclared names will raise ``TargetNameError``.
+* in scoped expressions (including lambda expressions), ``NAME := EXPR`` is only
+  permitted if the target scope of ``NAME`` has previously been declared as being
+  local, nonlocal, or global. Assignments to undeclared names will raise
+  ``TargetNameError``. Assignments to comprehension and generation expression
+  iteration variables will also raise ``TargetNameError``.
+
+These changes mean PEP 572's restriction against top-level assignment
+expressions in block scopes can be dropped, as the fact that ``NAME = EXPR``
+implicitly declares a new function local while ``NAME := EXPR`` doesn't should
+provide sufficient incentive for developers to stick with the traditional
+top-level assignment statement in the cases where it applies.
+
+(Note: this proposed change is a direct application of PEP 20's admonition
+"In the face of ambiguity, refuse the temptation to guess". It doesn't rule
+out changing our minds later and deciding that some of these cases are
+sufficiently unambiguous that it's OK to make the most common desired behaviour
+implicit, but in the meantime, it means that readers unfamiliar with the new
+syntax will receive more hints as to what's going to happen at compile time and
+at runtime)
+
+
+Adding explicit inline scope declarations
+-----------------------------------------
+
+Removing the implicit target scoping rules for inline assignment expressions
+has the potential to hinder their intended benefits in reducing the amount of
+vertical screen real-estate consumed by a block of code.
+
+To quote an example from PEP 572, Python developers can already write::
+
+    match = re.match(data)
+    group = match.group(1) if match else None
+
+This means that if a developer would currently be inclined to save a line by
+writing this code using the less efficient form::
+
+    group = re.match(data).group(1) if re.match(data) else None
+
+They're not likely to find either of the following an attractive alternative to
+the status quo::
+
+    match = None
+    group = match.group(1) if (match := re.match(data)) else None
+
+    match: typing.Match
+    group = match.group(1) if (match := re.match(data)) else None
+
+To address this, a new ``given TARGETS`` subclause would be added to selected
+constructs, allowing inline declaration of valid target names in the following
+cases:
+
+* while loops: ``while EXPR given TARGETS:``
+* if statements: ``if EXPR given TARGETS:``
+* elif clauses: ``elif EXPR given TARGETS:``
+* conditional expressions: ``LHS if COND given TARGETS else RHS``
+* lambda expressions: ``lambda ARGSPEC: EXPR given TARGETS``
+* as a trailing clause in comprehensions and generator expressions:
+  ``EXPR for VAR1 in ITER1 for VAR2 in ITER2 given TARGETS``
+
+This would allow the more efficient version of the above code to be written as::
+
+    group = match.group(1) if (match := re.match(data)) given match else None
+
+The ``TARGETS`` subclause would be a new kind of grammar node, permitting the
+following forms:
+
+* ``NAME``: simple declaration of a local variable, such that the statement
+  ``if NAME := EXPR given NAME: pass`` is roughly equivalent to ``NAME = EXPR``.
+* ``nonlocal NAME``: equivalent to a ``nonlocal NAME`` statement.
+* ``global NAME``: equivalent to a ``global NAME`` statement.
+* ``(NAME [: EXPR] [= EXPR])``: declaration of a name with an optional type
+  annotation and initial value (equivalent to a full inline assignment
+  statement, but restricted to simple name targets).
+* ``(TARGET1, TARGET2, ...)``: a parenthesised sequence of target declarations,
+  allowing multiple targets to be declared without requiring multiple ``given``
+  clauses.
+
+Scoped expressions (including lambda expressions) would behave the same way as
+any other nested function scope: ``... given NAME`` would declare the target
+name to be local to the scoped expression, and omitting that declaration would
+lead to a compile time ``TargetNameError``. If a developer wishes for the name
+to be bound in an outer scope instead, they will need to write
+``... given nonlocal NAME`` or ``... given global NAME``, just as they would
+need a ``nonlocal NAME`` or ``global NAME`` to change the target scope in a
+regular nested function.
+
+
+Postfix keyword semantics
+-------------------------
+
+To allow ``given` clauses to be introduced without a ``__future__`` import,
+the grammar would be modified to introduce the notion of "postfix keywords":
+keywords which can never start a new expression or statements, and hence don't
+conflict with the use of such words as regular variable and attribute names.
+
+Sections of the grammar that currently reference the ``NAME`` node directly
+would be changed to reference a new ``names_plus: NAME | postfix_keyword``
+node instead.
+
+While ``given`` would be the only initial entry under the ``postfix_keyword``
+node, other potential candidates for inclusion would be ``as``, ``is``, ``or``,
+and ``and``.
+
+
+Examples
+========
+
+Partial sums
+------------
+
+PEP 572 requires that partial sums be accumulated in the containing scope. This
+PEP instead allows them to be accumulated directly in the implicitly nested
+scope by declaring them as an initialised local variable::
+
+    partial_sums = [(total := total + x) for x in values given (total = 0)]
+
+
+Simplifying list comprehensions
+-------------------------------
+
+These examples are from PEP 572, and need a ``given y`` appended in order
+to use a local variable within the implicitly nested scope::
+
+    results = [(x, y, x/y) for x in input_data if (y := f(x)) > 0 given y]
+
+    stuff = [[y := f(x), x/y] for x in range(5) given y]
+
+To bind the name in the containing scope instead, the scope declaration needs to
+``given nonlocal y`` or ``given global y`` as appropriate.
+
+
+Capturing condition values
+--------------------------
+
+These examples are from PEP 572, and need a ``given NAME`` appended in order to
+use a local variable within the current scope::
+
+    # Loop-and-a-half
+    while (command := input("> ")) != "quit" given command:
+        print("You entered:", command)
+
+    # Reading socket data until an empty string is returned
+    while data := sock.recv() given data:
+        print("Received data:", data)
+
+    # Capturing regular expression match objects
+    if match := re.search(pat, text) given match:
+        print("Found:", match.group(0))
+    elif match := re.search(otherpat, text):
+        print("Alternate found:", match.group(0))
+    elif match := re.search(third, text):
+        print("Fallback found:", match.group(0))
+
+Note that if one of the ``elif`` clauses has a typo in the target name, then
+the compiler will typically catch that and raise ``TargetNameError`` (it will
+only miss it if the typo results in a different valid target name, or if the
+``if``-``elif`` chain is at module or class scope).
+
+If an ``elif`` clause does need to introduce a new name, then it can have its
+own ``given`` clause (which will make the introduction of the new target name
+more obvious to the reader of the code).
+
+
+Fork
+----
+
+Another example taken from PEP 572, with a ``given pid`` appended to make
+both the compiler and the reader aware that the ``if`` statement is binding
+a new target name::
+
+    if pid := os.fork() given pid:
+        # Parent code
+    else:
+        # Child code
+
+
+Deliberately updating parent scope state
+----------------------------------------
+
+Since this PEP deliberately exposes the fact that scoped expressions are
+implemented as implicitly nested functions, the related examples from PEP 572
+become slightly more verbose in some respects, since the target scope has to be
+specified explicitly. However, they become less verbose in other ways, since
+the iteration variable can be exported to the outer scope directly, rather than
+needing to be found to a different name in an assignment expression.
+
+Updating a module global::
+
+    if any(line.startswith('#') for line in lines given global line):
+        print("First comment:", line)
+    else:
+        if "line" not in globals():
+            print("There was no input")
+        else:
+            print("There are no comments")
+
+    if all(line.strip() == '' for line in lines given global line):
+        if "line" not in globals():
+            print("There was no input")
+        else:
+            print("All lines are blank")
+    else:
+        print("First non-blank line:", line)
+
+    # Compute partial sums in a list comprehension
+    total = 0
+    partial_sums = [total := total + v for v in values given global total]
+    print("Total:", total)
+
+Updating a function local::
+
+    line = _no_lines = object()
+    if any(line.startswith('#') for line in lines given nonlocal line):
+        print("First comment:", line)
+    else:
+        if line is _no_lines:
+            print("There was no input")
+        else:
+            print("There are no comments")
+
+    line = _no_lines = object()
+    if all(line.strip() == '' for line in lines given nonlocal line):
+        if line is _no_lines:
+            print("There was no input")
+        else:
+            print("All lines are blank")
+    else:
+        print("First non-blank line:", line)
+    if line is _no_lines:
+        print("There was no input")
+
+    # Compute partial sums in a list comprehension
+    total = 0
+    partial_sums = [total := total + v for v in values given nonlocal total]
+    print("Total:", total)
+
+It's the view of this PEP's author that the requirement to be explicit in these
+cases makes it clearer to a reader what's actually going on, without requiring
+them to make the intuitive leap that a name binding expression inside a generator
+expression or comprehension is going to implicitly leak into the current scope.
+
+In the function scope case, the need to explicitly declare the target local
+variable first also encourages handling the case where the generator expression
+or comprehension never iterates at all, and hence the inline assignment
+expression never gets executed.
+
+Rewriting these examples for this PEP allowed the PEP author to notice the
+following issues in the PEP 572 examples::
+
+* neither of the line processing examples handled the case where ``lines`` was empty
+* the comment processing example always left ``comment`` bound to the last
+  processed line, regardless of whether that line was a comment or not
+* the blank line checking example always left ``nonblank`` bound to the last
+  processed line, regardless of whether that line was blank or not
+
+These issues were addressed here by exporting the ``line`` iteration variable
+directly instead of binding it to a different name, and by pre-binding ``line``
+to a sentinel value that indicated the comprehension never rebound it to a
+different target.
+
+Fixes were also submitted for PEP 572: https://github.com/python/peps/pull/684/files
+
+
+Open Questions
+==============
+
+
+Comprehensions and the outermost iterable clause
+------------------------------------------------
+
+Given current comprehension evaluation semantics, the outermost iterable clause
+in a comprehension isn't going to be able to see any names defined in the
+``given`` clause (since the outermost iterable gets evaluated in the containing
+scope, before any initialisers in the ``given`` clause run).
+
+However, since the given clause is completely new, the following compilation
+rule could be introduced: if a comprehension or generator expression uses a
+given clause, then the outermost iterable expression is evaluated inside the
+implicitly nested scope, after any given statements have been executed.
+
+
+Execution of initialisers in while loops
+----------------------------------------
+
+The ``given`` clause is comprehensions and generator expressions is only going
+to be executed once, before the iterative cycle gets started.
+
+It likely makes sense to use the same principle for the ``while`` statement
+header clause, such that the partial sums example maps easily to the ``while``
+loop form::
+
+    while (total := total + get_value()) < limit given (total = 0):
+        ...
+
+And you could write code like::
+
+    while time.monotonic() < deadline given (deadline = time.monotonic() + timeout):
+        ...
+
+
+The argument against allowing this is that this code can already be quite
+clearly written as::
+
+    total = 0
+    while (total := total + get_value()) < limit:
+        ...
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        ...
+
+Under this view, ``if``, ``elif``, and ``while`` wouldn't permit the inline
+initialiser form at all, and instead require that initialisers be written as
+a preceding regular assignment statement (even when that requires introducing a
+nested ``else`` clause in the ``elif`` case).
+
+This view would also bring into question the advisability of allowing new
+target declarations in ``elif`` clauses at all - it may be reasonable to require
+such cases to be written as a full nested ``if`` statement in an ``else`` clause,
+deliberately breaking up the symmetry across the different branches.
+
+Current thoughts: keep the TARGETS clause consistent everywhere, and be clear
+that in while loops, comprehensions, and generator expressions, any initialisers
+in the TARGETS clause only get executed once (before the loop starts)
+
+
+Updating augmented assignments to raise TargetNameError
+-------------------------------------------------------
+
+The cases where the current PEP proposes to raise ``TargetNameError`` are
+essentially those where an augmented assignment in the same location would raise
+``UnboundLocalError``::
+
+    >>> def f():
+    ...     x += 1
+    ...
+    >>> f()
+    Traceback (most recent call last):
+      File "<stdin>", line 1, in <module>
+      File "<stdin>", line 2, in f
+    UnboundLocalError: local variable 'x' referenced before assignment
+
+There are many such cases which the compiler could potentially detect at compile
+time instead, and raise ``TargetNameError``.
+
+However, any such change would need to be introduced as a deprecation warning
+for at least one release, as an ``UnboundLocalError`` in dead code that you
+never actually call is harmless, but a ``TargetNameError`` in such code at
+compile time would keep the entire module from being imported.
+
+
+Usage in lambda expressions
+---------------------------
+
+Support for given clauses in lambda expressions is mainly proposed for
+consistency with other scoped expressions, including maintaining the
+rough semantic equivalence between unfiltered generator expressions and passing
+a lambda expression to the ``map()`` builtin.
+
+As such, this aspect of the proposal could readily be deferred pending more
+compelling concrete examples.
+
+
+Design discussion
+=================
+
+Assignment target ambiguity in scoped expressions
+-------------------------------------------------
+
+This PEP considers the target for all inline assignments in scoped expressions
+to be inherently ambiguous. This ambiguity is best illustrated with container
+comprehensions, as there are two quite distinct ways of thinking about those.
+
+The first way matches the way that container comprehensions were first implemented
+in Python 2.0: as syntactic sugar for a procedural ``for`` loop. This implementation
+approach meant that ``[x for x in iterable]`` was semantically equivalent to::
+
+    _expr_result = []
+    for x in iterable:
+        _expr_result.append(x)
+    # Use _expr_result as the result of the comprehension expression
+
+This semantic equivalence extended to having the iteration variable (``x``
+in the example) get set in the containing scope (potentially overwriting a
+previously bound value).
+
+The second way matches the way that generator expressions have worked since their
+introduction in Python 2.4, and the way that container comprehensions were
+updated to work in Python 3.0: as an implicitly defined nested function that
+gets called immediately after being defined. This implementation approach (with
+PEP 289's original refinement to eagerly evaluate the outermost iterable) means
+that ``[x for x in iterable]`` is currently semantically equivalent to::
+
+    def _listcomp(outmost_iterable):
+        _result = []
+        for x in iterable:
+            _result.append(x)
+        return _result
+    _expr_result = _listcomp(iterable)
+    # Use _expr_result as the result of the comprehension expression
+
+This semantic equivalence covers all aspects of comprehension execution,
+including the way that names get resolved (or fail to get resolved) in outer
+scopes.
+
+This execution model explicitly *broke* the semantic equivalence to the ``for``
+loop based version, since it keeps the iteration variable from being bound in
+the containing scope.
+
+The current behaviour means that, as of Python 3.7, the scoping rules for scoped
+expressions can all still be defined as "they use the same scoping rules as the
+equivalent nested function".
+
+PEP 572 proposes to replace that existing design principle with the following
+set of rules:
+
+* lambda expressions continue to use the same scoping rules as nested functions
+* container comprehensions go partially back to behaving like an inline ``for``
+  loop (with all inline assignments affecting the containing scope, including
+  implicit declarations of new local variables), *except* that the iteration
+  variable remains hidden from the containing scope, *and* name *lookups* still
+  behave like a nested function
+* generator expressions start behaving more like an inline ``for`` loop,
+  retaining consistency with container comprehensions, but losing consistency
+  with lambda expressions
+
+These proposed scoping semantics make sense *if* you accept that the ``for``
+statement form is the "correct" way of thinking about comprehensions, and that
+the use of an implicit nested function to implement the iteration variable
+hiding in Python 3.0 is merely an unfortunately exposed implementation detail.
+
+Unfortunately, once we start consider the reasonable expectations of users that
+have never used Python 2, and are only familiar with Python 3's more encapsulated
+comprehension semantics, PEP 572's proposed approach creates some inherent
+inconsistencies in the language where very similar looking code ends up not
+working due to subtle differences in order of evaluation.
+
+For example, consider the following data manipulation pipeline::
+
+    stage1 = [f(x) for x in data if f(x)]
+    stage2 = [g(x) for x in stage1 if g(x)]
+
+Given PEP 572, a developer may decide to use inline assignment to avoid repeated
+execution of the condition expression when calculating the result tuple for each
+iteration::
+
+    stage1 = [y for x in data if y := f(x)]
+    stage2 = [y for x in stage1 if y := g(x)]
+
+And then they may further decide to make the whole process evaluated on demand
+by using generator expressions rather than list comprehensions::
+
+    stage1 = (y for x in data if y := f(x))
+    stage2 = (y for x in stage1 if y := g(x))
+
+So far, the fact that ``stage1`` and ``stage2`` are sharing their storage for
+``y`` isn't visible without close runtime state introspection, so developers
+could be forgiven for assuming that the comprehensions and generator
+expressions in the above examples are still self-contained.
+
+Where things would start to go subtly wrong is if the developer:
+
+* also has a local variable named ``y`` that they're using for other purposes
+  (even though a local variable named ``x`` would be unaffected)
+* attempts to use the ``y`` variable to maintain state between iterations in
+  the generator expression version (even though that would work fine in the
+  eagerly evaluated list comprehension version)
+
+That is, this code would be correct::
+
+    x = starting_x = object()
+    stage1 = [y for x in data if y := f(x)]
+    stage2 = [y for x in stage1 if y := g(x)]
+    assert x is starting_x # Succeeds due to "x" being private
+
+But this code would be incorrect for any non-empty ``data`` iterable::
+
+    y = starting_y = object()
+    stage1 = [y for x in data if y := f(x)]
+    stage2 = [y for x in stage1 if y := g(x)]
+    assert y is starting_y # Fails due to "y" leaking by default
+
+And similarly, this code would be correct due to the eager iteration::
+
+    tally = 0
+    stage1 = [(tally := tally + y) for x in data if y := f(x)]
+    tally = 0
+    stage2 = [(tally := tally + y) for x in stage1 if y := g(x)]
+
+But the generator form would have to use distinct variable names to maintain
+that correctness::
+
+    tally1 = 0
+    stage1 = ((tally1 := tally1 + y) for x in data if y := f(x))
+    tally2 = 0
+    stage2 = ((tally2 := tally2 + y) for x in stage1 if y := g(x))
+
+This PEP instead proposes that we *keep* the simple "scoped expressions use the
+same scoping rules as the equivalent nested function", and have them all default
+to raising ``TargetNameError`` for undeclared target names.
+
+The example data pipelines above would then need to be written as::
+
+    stage1 = [(x, y) for x in data if y := f(x) given y]
+    stage2 = [(x, y) for x in stage1 if y := g(x) given y]
+
+And::
+
+    stage1 = ((x, y) for x in data if y := f(x) given y)
+    stage2 = ((x, y) for x in stage1 if y := g(x) given y)
+
+The partial sum pipelines would look like::
+
+    stage1 = [(tally := tally + y) for x in data if y := f(x) given (y, (tally=0))]
+    stage2 = [(tally := tally + y) for x in stage1 if y := g(x) given (y, (tally=0))]
+
+And::
+
+    stage1 = ((tally := tally + y) for x in data if y := f(x) given (y, (tally=0)))
+    stage2 = ((tally := tally + y) for x in stage1 if y := g(x) given (y, (tally=0)))
+
+If you actually *wanted* the iteration variable or an internal assignment to
+leak, then you'd append an appropriate ``nonlocal`` or ``global`` declaration::
+
+    x = _no_data = object()
+    stage1 = [y for x in data if y := f(x) given (y, nonlocal x)]
+    print("Last stage 1 input considered:", x)
+    stage2 = [(x, y) for x in stage1 if y := g(x) given (y, nonlocal x)]
+    print("Last stage 2 input considered:", x)
+
+
+Relationship with PEP 572
+=========================
+
+The case for allowing inline assignments at all is made in PEP 572. This
+competing PEP was initially going to propose an alternate surface syntax
+(``EXPR given NAME = EXPR``), while retaining the expression semantics from
+PEP 572, but that changed when discussing one of the initial motivating use
+cases for allowing embedded assignments at all: making it possible to easily
+calculate cumulative sums in comprehensions and generator expressions.
+
+My first attempt at better handling that case became PEP 577, but I decided
+I didn't like the consequences of allowing arbitrary inline augmented assignments
+(see that PEP's withdrawal notice for details).
+
+This PEP thus represents my second attempt at resolving my concerns with
+PEP 572's proposed scoping semantics, and I like it a lot better, especially
+as it also directly addresses the partial sum accumulation feature request
+without relying on state leaking outside the affected comprehension or generator
+expression.
+
+
+Acknowledgements
+================
+
+The PEP author wishes to thank Chris Angelico for his work on PEP 572, and his
+efforts to create a coherent summary of the great many sprawling discussions
+that spawned on both python-ideas and python-dev, as well as Tim Peters for
+the in-depth discussion of parent local scoping that prompted the above
+scoping proposal for augmented assignments inside scoped expressions.
+
+Eric Snow's feedback on a pre-release version of PEP 577 helped make it
+significantly more readable, and then Guido van Rossum's review comments on
+PEP 577 were one of the main drivers that led to it being withdrawn and this
+proposal being made in its place.
+
+
+Appendix A: Additional Examples from PEP 572
+============================================
+
+These examples come from Tim Peters' notes in PEP 572 Appendix A::
+
+    if result := solution(xs, n) given result:
+        # use result
+
+::
+
+    if reductor := dispatch_table.get(cls) given reductor:
+        rv = reductor(x)
+    elif reductor := getattr(x, "__reduce_ex__", None):
+        rv = reductor(4)
+    elif reductor := getattr(x, "__reduce__", None):
+        rv = reductor()
+    else:
+        raise Error("un(shallow)copyable object of type %s" % cls)
+
+::
+
+    if (diff := x - x_base) and (g := gcd(diff, n)) > 1 given (diff, g):
+        return g
+
+::
+
+    while a > (d := x // a**(n-1)) given d:
+        a = ((n-1)*a + d) // n
+    return a
+
+
+References
+==========
+
+TODO: These are the same references as for PEP 577, but I haven't worked them
+in to the text of the replacement PEP yet.
+
+.. [1] The beginning of Tim's genexp & comprehension scoping thread
+       (https://mail.python.org/pipermail/python-ideas/2018-May/050367.html)
+
+.. [2] Reintroducing the original cumulative sums use case
+       (https://mail.python.org/pipermail/python-ideas/2018-May/050544.html)
+
+.. [3] Tim's language reference level explanation of his proposed scoping semantics
+       (https://mail.python.org/pipermail/python-ideas/2018-May/050729.html)
+
+.. [4] Guido's endorsement of Tim's proposed genexp & comprehension scoping
+       (https://mail.python.org/pipermail/python-ideas/2018-May/050411.html)
+
+
+Copyright
+=========
+
+This document has been placed in the public domain.
+
+
+
+..
+   Local Variables:
+   mode: indented-text
+   indent-tabs-mode: nil
+   sentence-end-double-space: t
+   fill-column: 70
+   coding: utf-8
+   End:
