@@ -344,11 +344,11 @@ expression never gets executed.
 Rewriting these examples for this PEP allowed the PEP author to notice the
 following issues in the PEP 572 examples::
 
-* neither of the line processing examples handled the case where ``lines`` is empty
-* the comment processing example always leaves ``comment`` bound to the last
-  processed line, regardless of whether that line is a comment or not
-* the blank line checking example always leaves ``nonblank`` bound to the last
-  processed line, regardless of whether that line is blank or not
+* neither of the line processing examples handled the case where ``lines`` was empty
+* the comment processing example always left ``comment`` bound to the last
+  processed line, regardless of whether that line was a comment or not
+* the blank line checking example always left ``nonblank`` bound to the last
+  processed line, regardless of whether that line was blank or not
 
 These issues were addressed here by exporting the ``line`` iteration variable
 directly instead of binding it to a different name, and by pre-binding ``line``
