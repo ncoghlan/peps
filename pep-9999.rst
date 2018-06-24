@@ -341,6 +341,19 @@ variable first also encourages handling the case where the generator expression
 or comprehension never iterates at all, and hence the inline assignment
 expression never gets executed.
 
+Rewriting these examples for this PEP allowed the PEP author to notice the
+following issues in the PEP 572 examples::
+
+* neither of the line processing examples handled the case where ``lines`` is empty
+* the comment processing example always leaves ``comment`` bound to the last
+  processed line, regardless of whether that line is a comment or not
+* the blank line checking example always leaves ``nonblank`` bound to the last
+  processed line, regardless of whether that line is blank or not
+
+These issues were addressed by exporting the ``line`` iteration variable
+directly instead of binding it to a different name, and by pre-binding ``line``
+to a sentinel value that indicated the comprehension never rebound it to a
+different target.
 
 
 Open Questions
@@ -429,6 +442,18 @@ However, any such change would need to be introduced as a deprecation warning
 for at least one release, as an ``UnboundLocalError`` in dead code that you
 never actually call is harmless, but a ``TargetNameError`` in such code at
 compile time would keep the entire module from being imported.
+
+
+Usage in lambda expressions
+---------------------------
+
+Support for given clauses in lambda expressions is mainly proposed for
+consistency with other scoped expressions, including maintaining the
+rough semantic equivalence between unfiltered generator expressions and passing
+a lambda expression to the ``map()`` builtin.
+
+As such, this aspect of the proposal could readily be deferred pending more
+compelling concrete examples.
 
 
 Design discussion
