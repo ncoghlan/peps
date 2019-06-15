@@ -192,26 +192,7 @@ as an entry in the "Porting to Python 3.9" section of the What's New document.
 References
 ==========
 
-.. [1] IDLE: Right Click Context Menu, Foord, Michael
-   (http://bugs.python.org/issue1207589)
-
-.. [2] Cut/Copy/Paste items in IDLE right click context menu
-   (https://mail.python.org/pipermail/python-dev/2012-November/122514.html)
-
-.. [3] Getting Started with Python
-   (http://www.python.org/about/gettingstarted/)
-
-.. [4] Batteries Included
-   (http://docs.python.org/2/tutorial/stdlib.html#batteries-included)
-
-.. [5] IDLE breakpoint facility undocumented, Deily, Ned
-   (http://bugs.python.org/issue10405)
-
-.. [6] IDLE: calltips mishandle raw strings and other examples,
-   Reedy, Terry (http://bugs.python.org/issue12510)
-
-.. [7] IDLE: replace ending with '\' causes crash, Reedy, Terry
-   (http://bugs.python.org/issue13052)
+TODO...
 
 
 Copyright
