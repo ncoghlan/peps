@@ -84,7 +84,8 @@ This PEP proposes moving development of Python's Tcl/Tk bindings, the IDLE
 Python editor, and the ``turtle`` module, into a new independently versioned
 ``tcl-tk-idle`` repository under the Python GitHub organisation. This repository
 will be set up to publish three distinct projects to PyPI: ``tkinter``,
-``idle``, and ``turtle``.
+``idle``, and ``turtle`` (the last would also include the ``turtledemo``
+package).
 
 As we have routinely had end users express appreciation for having these
 modules available as part of the default installation in various constrained
