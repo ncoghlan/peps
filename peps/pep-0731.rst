@@ -72,7 +72,7 @@ proposals, requirements, constraints, and conventions,
 to make progress without having a small trusted group of deciders.
 
 At the 2023 Language Summit in Salt Lake City it was decided to start work on
-an `inventory of problems <https://github.com/capi-working-group/problems>`__.
+an `inventory of problems <https://github.com/capi-workgroup/problems/>`__.
 At the 2023 core developer sprint in Brno this work is more or less finished
 and after a discussion it appeared that the next step is to establish
 a working group to ensure that we're not stymied forever.
